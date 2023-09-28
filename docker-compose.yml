@@ -1,0 +1,70 @@
+version: '3'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+    ports:
+      - 2181:2181
+
+  kafka:
+    image: confluentinc/cp-kafka
+    restart: "no"
+    depends_on:
+      - zookeeper
+    ports:
+      - 29092:29092
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_LISTENERS=INTERNAL://:29092,EXTERNAL://:9092
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+
+  kafka-init:
+    image: confluentinc/cp-kafka
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      # blocks until kafka is reachable
+      kafka-topics --bootstrap-server kafka:29092 --list
+
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic orders --replication-factor 1 --partitions 1
+
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop
+    restart: "no"
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:29092"
+    ports:
+      - 9000:9000
+    depends_on:
+      - kafka
+
+  producer:
+    build: ./producer
+    ports:
+      - '8000:8000'
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    depends_on:
+      - kafka-init
+
+  consumer:
+    build: ./consumer
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_GROUP_ID=fastapi-kafka-consumer
+    depends_on:
+      - kafka-init
